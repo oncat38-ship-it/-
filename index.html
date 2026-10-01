@@ -49,6 +49,11 @@ button{border:0;border-radius:10px;padding:10px 13px;font-weight:750}
 .pill{display:inline-block;background:var(--blue2);color:#3153bd;padding:4px 8px;border-radius:8px;font-size:11px;font-weight:750}
 .detail{padding:12px;background:#fafbfe;border-top:1px solid #eee;font-size:13px;line-height:1.8}
 .empty{padding:25px;text-align:center;color:var(--muted);background:#fff;border:1px solid var(--line);border-radius:14px}
+.edit-box{padding:12px;background:#f7f8fc;border-top:1px solid #eee}
+.edit-grid{display:grid;gap:8px}
+.edit-actions{display:flex;gap:7px;margin-top:8px}.edit-actions button{flex:1}
+.filter-bar{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:9px}
+.check{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700}.check input{width:auto}
 @media(max-width:430px){.item{grid-template-columns:35px 35px minmax(0,1fr) auto;font-size:12px}.row{gap:6px}}
 </style>
 </head>
@@ -127,6 +132,10 @@ button{border:0;border-radius:10px;padding:10px 13px;font-weight:750}
 <div class="row" style="justify-content:space-between;align-items:center">
 <div class="title">登録済み一覧</div>
 <div class="small" id="historyCount"></div>
+</div>
+<div class="filter-bar">
+<label class="check"><input id="showRarity3" type="checkbox"> ★3を表示</label>
+<div class="small">★3は初期状態では非表示</div>
 </div>
 <div id="history"></div>
 </section>
@@ -233,20 +242,90 @@ function renderInput(){
  if(!char)document.getElementById('selected').value=data.settings.selected||'PU-A';
 }
 function renderHistory(){
- const ar=a(), box=document.getElementById('history');document.getElementById('historyCount').textContent=ar.length+'件';
+ const ar=a(), box=document.getElementById('history'), show3=document.getElementById('showRarity3')?.checked;
+ document.getElementById('historyCount').textContent=ar.length+'件';
  if(!ar.length){box.innerHTML='<div class="empty">まだ登録されていません。<br>「登録」からガチャ結果を追加してください。</div>';return}
  box.innerHTML='';
  for(let end=ar.length;end>0;){
   const start=Math.max(0,end-10), chunk=ar.slice(start,end);
+  const visible=show3?chunk:chunk.filter(x=>x.rarity!==3);
+  if(!visible.length){end=start;continue}
+  const hidden3=chunk.filter(x=>x.rarity===3).length;
   const d=document.createElement('details');d.className='history-group';if(end===ar.length)d.open=true;
-  d.innerHTML=`<summary>${start+1}～${end}回　（${chunk.length}件）</summary>`;
+  d.innerHTML=`<summary>${start+1}～${end}回　（表示 ${visible.length}件${hidden3&&!show3?'・★3 '+hidden3+'件は非表示':''}）</summary>`;
   const h=document.createElement('div');
-  chunk.slice().reverse().forEach(x=>{
+  visible.slice().reverse().forEach(x=>{
+   const idx=ar.indexOf(x);
    let badge='';
    if(x.rarity===5)badge=type==='char'?(x.classification==='miss'?'すり抜け':x.classification==='guaranteed'?'確定PU':'50/50 PU'):(x.classification==='miss'?'選択PU外':x.classification==='guaranteed'?'選択PU確定':'選択PU');
-   h.innerHTML+=`<div class="item"><b>#${x.no}</b><span class="rarity r${x.rarity}">★${x.rarity}</span><span>${esc(x.name||'名前なし')}</span><span class="badge ${x.rarity===5?'good':''}">${badge}</span></div><div class="detail"><b>日時：</b>${esc(x.date||'未入力')}　${x.memo?'<br><b>メモ：</b>'+esc(x.memo):''}</div>`;
+   const row=document.createElement('div');
+   row.className='item';
+   row.innerHTML=`<b>#${x.no}</b><span class="rarity r${x.rarity}">★${x.rarity}</span><span>${esc(x.name||'名前なし')}</span><span class="badge ${x.rarity===5?'good':''}">${badge||' '}</span>`;
+   h.appendChild(row);
+   const detail=document.createElement('div');detail.className='detail';
+   detail.innerHTML=`<b>日時：</b>${esc(x.date||'未入力')} ${x.memo?'<br><b>メモ：</b>'+esc(x.memo):''}<div class="edit-actions"><button class="secondary" type="button" onclick="openEdit(${idx})">編集</button><button class="danger" type="button" onclick="deleteItem(${idx})">削除</button></div>`;
+   h.appendChild(detail);
   });
   d.appendChild(h);box.appendChild(d);end=start;
+ }
+}
+function openEdit(idx){
+ const ar=a(),x=ar[idx];if(!x)return;
+ const old=document.getElementById('editBox');if(old)old.remove();
+ const rows=[...document.querySelectorAll('#history .item')];
+ const target=rows.find(r=>r.querySelector('b')?.textContent===`#${x.no}`);
+ if(!target)return;
+ const box=document.createElement('div');box.id='editBox';box.className='edit-box';
+ const resultOptions=type==='char'
+  ?`<option value="">未設定</option><option value="PU">PU</option><option value="恒常">恒常（すり抜け）</option>`
+  :`<option value="">未設定</option><option value="PU-A">PU-A</option><option value="PU-B">PU-B</option><option value="その他">その他</option>`;
+ box.innerHTML=`<div class="title">#${x.no} を編集</div><div class="edit-grid">
+ <div><label>日時</label><input id="editDate" type="datetime-local" value="${esc(x.date||'')}"></div>
+ <div><label>名前</label><input id="editName" value="${esc(x.name||'')}"></div>
+ ${x.rarity===5?`<div><label>★5の結果</label><select id="editResult">${resultOptions}</select></div>`:''}
+ ${type==='weapon'&&x.rarity===5?`<div><label>選択PU</label><select id="editSelected"><option value="PU-A">PU-A</option><option value="PU-B">PU-B</option></select></div>`:''}
+ <div><label>メモ</label><input id="editMemo" value="${esc(x.memo||'')}"></div></div>
+ <div class="edit-actions"><button class="primary" type="button" onclick="saveEdit(${idx})">保存</button><button class="secondary" type="button" onclick="closeEdit()">キャンセル</button></div>`;
+ target.after(box);
+ if(x.rarity===5)document.getElementById('editResult').value=x.result||'';
+ if(type==='weapon'&&x.rarity===5)document.getElementById('editSelected').value=x.selected||data.settings.selected||'PU-A';
+}
+function closeEdit(){document.getElementById('editBox')?.remove()}
+function saveEdit(idx){
+ const ar=a(),x=ar[idx];if(!x)return;
+ x.date=document.getElementById('editDate').value;
+ x.name=document.getElementById('editName').value;
+ x.memo=document.getElementById('editMemo').value;
+ if(x.rarity===5){
+  x.result=document.getElementById('editResult').value;
+  if(type==='weapon')x.selected=document.getElementById('editSelected').value;
+ }
+ if(x.rarity===5 && !x.result){alert('★5の結果を選択してください。');return}
+ recalcClassifications(ar);save();update();setView('history');
+}
+function deleteItem(idx){
+ const ar=a(),x=ar[idx];if(!x)return;
+ if(!confirm(`#${x.no}（★${x.rarity}）を削除しますか？`))return;
+ ar.splice(idx,1);
+ ar.forEach((item,i)=>item.no=i+1);
+ recalcClassifications(ar);save();renderHistory();renderDashboard();renderFives();
+}
+function recalcClassifications(ar){
+ let misses=0,prev5=null;
+ for(const item of ar){
+  if(item.rarity!==5){item.classification='';continue}
+  if(type==='char'){
+   if(item.result==='恒常'){item.classification='miss';misses++}
+   else if(item.result==='PU'){
+    if(misses>0){item.classification='guaranteed'}else{item.classification='5050';misses=0}
+   }else item.classification='';
+  }else{
+   const selected=item.selected||data.settings.selected||'PU-A';
+   if(item.result===selected){item.classification=prev5&&prev5.classification==='miss'?'guaranteed':'5050'}
+   else if(item.result==='その他'||item.result==='PU-A'||item.result==='PU-B')item.classification='miss';
+   else item.classification='';
+  }
+  prev5=item;
  }
 }
 function renderFives(){
@@ -260,6 +339,7 @@ function renderFives(){
 }
 function esc(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 document.getElementById('rarity').addEventListener('change',renderInput);
+document.getElementById('showRarity3').addEventListener('change',renderHistory);
 document.getElementById('selected').addEventListener('change',e=>{data.settings.selected=e.target.value;save();update()});
 document.getElementById('form').addEventListener('submit',e=>{
  e.preventDefault();
@@ -310,6 +390,9 @@ function downloadJSON(){
 function importJSON(){
  const i=document.createElement('input');i.type='file';i.accept='.json';i.onchange=()=>{const r=new FileReader();r.onload=()=>{try{data=JSON.parse(r.result);save();update();alert('復元しました。')}catch(e){alert('読み込みに失敗しました。')}};r.readAsText(i.files[0])};i.click()
 }
+recalcClassifications(data.char);
+recalcClassifications(data.weapon);
+save();
 document.getElementById('date').value=new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,16);
 update();
 </script>
